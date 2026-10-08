@@ -171,6 +171,9 @@ class App(tk.Tk):
 
         self.notebook = ttk.Notebook(root)
         self.notebook.grid(row=3, column=0, sticky="nsew", pady=8)
+        # Tk 8.6 on macOS (the one the release build bundles) leaves part of a tab undrawn the first
+        # time it is shown, e.g. the left column of the names tab, until something forces a redraw
+        self.notebook.bind("<<NotebookTabChanged>>", lambda _e: self.update_idletasks(), add="+")
         root.rowconfigure(3, weight=1)
 
         subs = ttk.Frame(self.notebook, padding=12)
