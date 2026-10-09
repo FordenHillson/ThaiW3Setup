@@ -6,11 +6,23 @@ if sys.platform == "win32":  # a bottle cannot exist here, and "c:" is not a leg
     raise SystemExit(0)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import json, plistlib
 from pathlib import Path
 from core import game_detect, wine
 from core.game_detect import EDITION_REMASTERED, identify
 from core.report import _mods_settings_paths
 from core.wine import Bottle, bottle_of
+
+# the maintained Whisky fork and Heroic 2.x keep their prefixes somewhere the first version never looked
+static_roots = [str(r) for r, _k in wine.BOTTLE_ROOTS]
+assert str(wine.CONTAINERS / "com.franke.Whisky" / "Bottles") in static_roots, static_roots
+assert str(wine.HOME / "Games/Heroic/Prefixes") in static_roots, static_roots
+
+# from here on only what each test lays out counts, not the bottles on the machine running it
+fake_home = Path(tempfile.mkdtemp())
+wine.BOTTLE_ROOTS = ()
+wine.CONTAINERS = fake_home / "Containers"
+wine.HEROIC_DIR = fake_home / "heroic"
 
 
 def make_bottle(name: str = "Witcher3") -> Bottle:
@@ -130,5 +142,119 @@ assert found == ["Flat", "pfx"], found
 single = Path(tempfile.mkdtemp())
 (single / "drive_c").mkdir()
 assert wine._prefixes_under(single, "Wine") == [wine.Bottle(single, "Wine")], "a root can be the prefix itself"
+
+single = Path(tempfile.mkdtemp())
+(single / "drive_c").mkdir()
+assert wine.Bottle(single, "Wine").name == single.name, "no Metadata.plist: the folder name"
+
+
+def make_prefix(path: Path, played: bool = False) -> Path:
+    """A prefix whose Z: maps the whole disk, as every launcher sets up; the game then runs from outside."""
+    docs = path / "drive_c" / "users" / "crossover" / "Documents"
+    docs.mkdir(parents=True)
+    (path / "drive_c" / "users" / "Public" / "Documents").mkdir(parents=True)
+    if played:
+        (docs / "The Witcher 3").mkdir()
+    (path / "dosdevices").mkdir()
+    (path / "dosdevices" / "c:").symlink_to("../drive_c")
+    (path / "dosdevices" / "z:").symlink_to("/")
+    return path
+
+
+def file_url(path: Path) -> str:
+    from urllib.parse import quote
+    return "file://" + quote(str(path))
+
+
+def use_launchers(home: Path) -> None:
+    wine.CONTAINERS = home / "Containers"
+    wine.HEROIC_DIR = home / "heroic"
+
+
+case_insensitive = Path(str(fake_home).upper()).exists()
+game_detect.exe_version = lambda _p: "5.0.15.65482"
+try:
+    # --- Whisky (the frankea fork): UUID folders, a pinned exe, and bottles listed in BottleVM.plist
+    home = Path(tempfile.mkdtemp())
+    use_launchers(home)
+    fork = make_prefix(home / "Containers" / "com.franke.Whisky" / "Bottles" / "9DE9CA62-0F73-45D2")
+    other = make_prefix(Path(tempfile.mkdtemp()) / "On Another Drive")
+    game = make_game(Path(tempfile.mkdtemp()) / "games" / "w3")
+    exe = game / "bin" / "x64_dx12" / "witcher3.exe"
+    pinned = Path(str(exe).lower()) if case_insensitive else exe  # Whisky can record it lowercased
+    (fork / "Metadata.plist").write_bytes(plistlib.dumps({"info": {"name": "TheWitcher3", "pins": [
+        {"name": "The Witcher 3", "removable": False, "url": {"relative": file_url(pinned)}}]}}))
+    for app, listed in (("com.isaacmarovitz.Whisky", other), ("com.franke.Whisky", fork)):
+        (home / "Containers" / app).mkdir(parents=True, exist_ok=True)
+        (home / "Containers" / app / "BottleVM.plist").write_bytes(
+            plistlib.dumps({"paths": [{"relative": file_url(listed)}]}))
+
+    found = wine.bottles()
+    assert [b.prefix for b in found] == [other, fork], found
+    assert found[1].label == "Whisky: TheWitcher3", found[1].label
+    assert found[1].pinned_programs() == [exe], (found[1].pinned_programs(), exe)
+    # both bottles reach the game through Z:, so the pin has to decide, not the order they were found in
+    assert bottle_of(game).prefix == fork, bottle_of(game)
+    docs = [d.parent.name for d in found[1].documents_dirs()]
+    assert docs == ["crossover", "Public"], "the user's own Documents come before Public"
+
+    games = game_detect.find_games()
+    assert [(g.path, g.store) for g in games] == [(game, "Whisky")], [(g.path, g.store) for g in games]
+
+    # --- Heroic 2.x: prefixes named after each game, games installed outside every prefix -----------
+    home = Path(tempfile.mkdtemp())
+    use_launchers(home)
+    heroic = home / "heroic"
+    prefixes = Path(tempfile.mkdtemp()) / "Prefixes"
+    w3_prefix = make_prefix(prefixes / "The Witcher 3")
+    played = make_prefix(prefixes / "Played Elsewhere", played=True)
+    (heroic / "GamesConfig").mkdir(parents=True)
+    # the shape Heroic 2.22.3 wrote: config.json, and one GamesConfig file per game keyed by its app name
+    (heroic / "config.json").write_text(json.dumps({"defaultSettings": {
+        "defaultWinePrefix": str(prefixes), "winePrefix": str(prefixes / "default")}}))
+    (heroic / "GamesConfig" / "wfBDXaNbvbX5wstp7eiDdR.json").write_text(json.dumps({
+        "wfBDXaNbvbX5wstp7eiDdR": {"winePrefix": str(w3_prefix), "wineVersion": {"type": "wine"}},
+        "version": "v0", "explicit": True}))
+    sideload = make_game(Path(tempfile.mkdtemp()) / "W3")
+    gog = make_game(Path(tempfile.mkdtemp()) / "The Witcher 3 Wild Hunt GOTY")
+    epic = make_game(Path(tempfile.mkdtemp()) / "TheWitcher3")
+    mac_only = make_game(Path(tempfile.mkdtemp()) / "Mac build")
+    (heroic / "sideload_apps").mkdir()
+    (heroic / "sideload_apps" / "library.json").write_text(json.dumps({"games": [{
+        "runner": "sideload", "app_name": "wfBDXaNbvbX5wstp7eiDdR", "title": "The Witcher 3",
+        "install": {"executable": str(sideload / "bin" / "x64_dx12" / "witcher3.exe"), "platform": "Windows"},
+        "folder_name": str(sideload / "bin" / "x64_dx12"), "is_installed": True}]}))
+    (heroic / "gog_store").mkdir()
+    (heroic / "gog_store" / "installed.json").write_text(json.dumps({"installed": [
+        {"appName": "1207664663", "platform": "windows", "install_path": str(gog)},
+        {"appName": "1", "platform": "osx", "install_path": str(mac_only)}]}))
+    (heroic / "legendaryConfig" / "legendary").mkdir(parents=True)
+    (heroic / "legendaryConfig" / "legendary" / "installed.json").write_text(json.dumps({
+        "epicw3": {"app_name": "epicw3", "install_path": str(epic), "platform": "Windows"}}))
+
+    labels = sorted(b.label for b in wine.bottles())
+    assert labels == ["Heroic: Played Elsewhere", "Heroic: The Witcher 3"], labels
+    installs = dict(wine.heroic_installs())
+    assert installs[sideload / "bin" / "x64_dx12"] == w3_prefix, installs
+    assert installs[gog] is None and installs[epic] is None and mac_only not in installs, installs
+
+    games = {g.path: g.store for g in game_detect.find_games()}
+    assert games == {sideload: "Heroic", gog: "Heroic", epic: "Heroic"}, games
+    # Heroic says which prefix runs the sideloaded game, even though another one has run the game before
+    assert bottle_of(sideload).prefix == w3_prefix, bottle_of(sideload)
+    # nothing records where the GOG copy runs: the prefix the game has already written to is the best guess
+    assert bottle_of(gog).prefix == played, bottle_of(gog)
+
+    # --- a broken launcher file is skipped, not fatal ----------------------------------------------
+    (heroic / "config.json").write_text("{ not json")
+    (heroic / "gog_store" / "installed.json").write_text("[]")
+    assert sideload in {g.path for g in game_detect.find_games()}
+finally:
+    game_detect.exe_version = orig_version
+
+if case_insensitive:
+    mixed = Path(tempfile.mkdtemp()) / "MixedCase" / "Inner"
+    mixed.mkdir(parents=True)
+    assert str(wine._true_case(Path(str(mixed).lower()))).endswith("MixedCase/Inner")
 
 print("test_wine ok")
