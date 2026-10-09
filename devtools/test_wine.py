@@ -245,7 +245,50 @@ try:
     # nothing records where the GOG copy runs: the prefix the game has already written to is the best guess
     assert bottle_of(gog).prefix == played, bottle_of(gog)
 
+    # --- GOG installed inside a bottle: the offline installer, and Galaxy for Windows ------------------
+    home = Path(tempfile.mkdtemp())
+    use_launchers(home)
+    shelf = home / "Containers" / "com.franke.Whisky" / "Bottles"
+    wine.BOTTLE_ROOTS = ((shelf, "Whisky"),)
+    offline = make_prefix(shelf / "1111-OFFLINE")
+    galaxy = make_prefix(shelf / "2222-GALAXY", played=True)  # Z: reaches the other bottle's game too
+
+    def gog_reg(bottle: Path, folder: str) -> Path:
+        """system.reg as Wine writes it after GOG's 32-bit installer ran: the key lands under Wow6432Node."""
+        win = "C:\\" + folder
+        reg = lambda s: s.replace("\\", "\\\\")
+        (bottle / "system.reg").write_text("\n".join([
+            "WINE REGISTRY Version 2", ";; All keys relative to REGISTRY\\\\Machine", "", "#arch=win64", "",
+            "[Software\\\\Wow6432Node\\\\GOG.com\\\\Games\\\\1207664663] 1791531478", "#time=1dd57c11b1e6b9a",
+            '"buildId"="58913412071462316"', '"dependsOn"=""',
+            f'"exe"="{reg(win)}\\\\bin\\\\x64_dx12\\\\witcher3.exe"',
+            '"gameID"="1207664663"', '"gameName"="The Witcher 3: Wild Hunt - Game of the Year Edition"',
+            '"installDate"=dword:00000000', '"language"="English"', f'"path"="{reg(win)}"',
+            f'"uninstallCommand"="{reg(win)}\\\\unins000.exe"', f'"workingDir"="{reg(win)}\\\\bin\\\\x64_dx12"', "",
+            "[Software\\\\Wow6432Node\\\\GOG.com\\\\Games\\\\1423049311] 1791531478", "#time=1dd57c11b1e6b9a",
+            '"gameName"="Cyberpunk 2077"', '"path"="C:\\\\GOG Games\\\\Cyberpunk 2077"', ""]), encoding="utf-8")
+        return make_game(bottle / "drive_c" / folder)
+
+    gog_offline = gog_reg(offline, "GOG Games\\The Witcher 3 Wild Hunt GOTY".replace("\\", "/")).resolve()
+    gog_galaxy = gog_reg(galaxy, "Program Files (x86)/GOG Galaxy/Games/The Witcher 3 Wild Hunt GOTY").resolve()
+    make_game(offline / "drive_c" / "GOG Games" / "Cyberpunk 2077")  # another GOG game is not ours
+
+    games = [(g.path.resolve(), g.store) for g in game_detect.find_games()]
+    # the offline copy also sits where _bottle_guesses looks, and must still be listed once, as GOG
+    assert sorted(games) == sorted([(gog_offline, "GOG"), (gog_galaxy, "GOG")]), games
+    assert bottle_of(gog_offline).prefix == offline.resolve(), "a game under drive_c belongs to that bottle, whatever Z: maps"
+    assert bottle_of(gog_galaxy).prefix == galaxy.resolve()
+    paths = _mods_settings_paths(identify(gog_offline))
+    assert paths[0] == offline.resolve() / "drive_c/users/crossover/Documents/The Witcher 3/mods.settings", paths
+
+    # copied in by hand, no installer: the registry knows nothing, the usual folder name still finds it
+    (offline / "system.reg").unlink()
+    games = [(g.path.resolve(), g.store) for g in game_detect.find_games()]
+    assert (gog_offline, "") in games, games
+    wine.BOTTLE_ROOTS = ()
+
     # --- a broken launcher file is skipped, not fatal ----------------------------------------------
+    use_launchers(heroic.parent)
     (heroic / "config.json").write_text("{ not json")
     (heroic / "gog_store" / "installed.json").write_text("[]")
     assert sideload in {g.path for g in game_detect.find_games()}
