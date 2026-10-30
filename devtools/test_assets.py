@@ -22,5 +22,10 @@ for slot in ("tr", "en"):
     files = storybook_files(slot)
     write_mod_content(tmp / ("sb_" + slot), files)
     back = read_bundle(tmp / ("sb_" + slot) / "blob0.bundle")
-    print("storybook", slot, len(back), all(a.data == b.data for a, b in zip(files, back)),
-          sum(1 for f in back if f.path.encode() in names), "paths in game", back[0].path)
+    tr_n = sum(1 for f in back if f.path.endswith("_tr.subs"))
+    en_n = sum(1 for f in back if f.path.endswith("_en.subs"))
+    assert tr_n == en_n > 0, (slot, tr_n, en_n)
+    assert all(a.data == b.data for a, b in zip(files, back)), slot
+    print("storybook", slot, len(back), "tr", tr_n, "en", en_n,
+          sum(1 for f in back if f.path.encode() in names), "paths in game")
+assert [f.path for f in storybook_files("tr")] == [f.path for f in storybook_files("en")]

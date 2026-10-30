@@ -38,11 +38,17 @@ def font_files(font: str) -> list[BundleFile]:
     return files
 
 
-def storybook_files(slot: str) -> list[BundleFile]:
+def storybook_files(slot: str = "tr") -> list[BundleFile]:
+    """Cutscene .subs follow TextLanguage, not the w3strings slot.
+
+    Ship both ``_tr.subs`` and ``_en.subs`` so Thai shows whether the player
+    picked the Turkish slot (recommended) or the English slot (Xbox).
+    ``slot`` is kept for call-site compatibility and ignored.
+    """
+    _ = slot  # TextLanguage may differ from the installed w3strings slot
     files = read_bundle(storybook_bundle())
-    if slot != "tr":
-        files = [BundleFile(f.path.replace("_tr.subs", f"_{slot}.subs"), f.data) for f in files]
-    return files
+    en = [BundleFile(f.path.replace("_tr.subs", "_en.subs"), f.data) for f in files]
+    return [*files, *en]
 
 
 def write_mod_content(content_dir: Path, files: list[BundleFile]) -> list[str]:

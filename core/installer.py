@@ -18,6 +18,7 @@ from . import __version__
 from . import mods_settings
 from .assets import font_files, storybook_files, write_mod_content
 from .bundle import BundleError
+from .recap_script import RecapScriptError, build_recap_menu_script
 from .compat import (COMPAT_MODS, MISSING, PatchStatus, game_parts, installed_patches, open_sources, patch_files,
                      patch_info, patch_readme, patch_status, patched_paths, write_patch_info)
 from .custom import merged_overrides
@@ -428,7 +429,18 @@ def _build_mods(game: GameInfo, opts: InstallOptions, staging: Path, report: Ins
         report.mods.append(MOD_FONT)
 
     if opts.storybook:
+        # .subs for storybook + script rewrite of embedded EN recap lines (no USM override —
+        # patching the video made the pre-menu cutscene fail and auto-skip).
         write_mod_content(staging / MOD_STORY / "content", storybook_files(opts.slot))
+        try:
+            rel, data = build_recap_menu_script(game.content0)
+            target = staging / MOD_STORY / "content" / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        except (RecapScriptError, BundleError, OSError) as exc:
+            log.warning("recap script skipped: %s", exc)
+            report.warnings.append("ข้ามการแปลซับฉากก่อนเมนู (สคริปต์/ไฟล์วิดีโอของเกมไม่ตรง)"
+                                   " — คัตซีน Storybook อื่นยังเป็นไทย")
         report.mods.append(MOD_STORY)
 
     if opts.subtitle_style:
