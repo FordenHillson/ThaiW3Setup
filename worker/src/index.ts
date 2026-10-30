@@ -217,7 +217,7 @@ async function listReports(env: Env): Promise<Response> {
   const rows = objects.slice(0, LIST_LIMIT).map((o) => {
     const m = o.customMetadata ?? {};
     const contact = m.contact ?? "";
-    return `<tr${contact ? ' class="contact"' : ""}><td>${esc(o.uploaded.toISOString().replace("T", " ").slice(0, 19))}</td>`
+    return `<tr${contact ? ' class="contact"' : ""}><td>${esc(formatThaiTime(o.uploaded))}</td>`
       + `<td><a href="/r/${encodeURIComponent(o.key)}">${esc(m.id ?? o.key)}</a></td>`
       + `<td>${esc(contact)}</td>`
       + `<td>${esc(m.app ?? "")}</td><td>${esc(m.game ?? "")}</td><td>${esc(m.os ?? "")}</td><td>${esc(m.country ?? "")}</td>`
@@ -228,10 +228,15 @@ async function listReports(env: Env): Promise<Response> {
 <style>body{font:14px system-ui,sans-serif;margin:24px}table{border-collapse:collapse}
 td,th{border:1px solid #ccc;padding:4px 8px;text-align:left}th{background:#f3f3f3}
 tr.contact td{background:#fff6d5;font-weight:600}</style>
-<h1>ThaiW3Setup reports</h1><p>${objects.length} reports (newest ${Math.min(objects.length, LIST_LIMIT)} shown, times in UTC),
+<h1>ThaiW3Setup reports</h1><p>${objects.length} reports (newest ${Math.min(objects.length, LIST_LIMIT)} shown, เวลาไทย ICT),
 ${waiting} asking to be contacted (highlighted)</p>
 <table><tr><th>received</th><th>id</th><th>contact</th><th>app</th><th>game</th><th>os</th><th>country</th><th>size</th></tr>${rows.join("")}</table>`;
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
+/** ``YYYY-MM-DD HH:MM:SS`` in Asia/Bangkok (ICT = UTC+7, no DST). */
+function formatThaiTime(d: Date): string {
+  return new Date(d.getTime() + 7 * 3600_000).toISOString().replace("T", " ").slice(0, 19);
 }
 
 async function showReport(env: Env, key: string): Promise<Response> {
