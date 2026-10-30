@@ -15,8 +15,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     # sv_ttk is Tcl code and sprite sheets next to its __init__.py
-    datas=[("assets", "assets"), *collect_data_files("sv_ttk")],
-    hiddenimports=["PIL._tkinter_finder"],
+    # certifi's cacert.pem must ship in the Windows build too (ssl_context loads it on every OS)
+    datas=[("assets", "assets"), *collect_data_files("sv_ttk"), *collect_data_files("certifi")],
+    hiddenimports=["PIL._tkinter_finder", "certifi"],
     excludes=["numpy", "pandas", "matplotlib", "scipy", "IPython", "pytest", "unittest", "pydoc",
               "lxml", "PIL.ImageQt", "PyQt5", "PySide2", "PySide6"],
     noarchive=False,

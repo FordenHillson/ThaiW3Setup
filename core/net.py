@@ -1,10 +1,11 @@
-"""HTTPS requests that also verify on the macOS build.
+"""HTTPS requests that verify against both the system store and certifi.
 
-The .app bundles python.org's Python, and its OpenSSL trusts no certificate authority until the installer's
-"Install Certificates" step runs, which never happens inside a bundle. Every request then failed with
-CERTIFICATE_VERIFY_FAILED, so the Mac build checked for updates, downloaded the sheets and sent reports in
-vain, falling back to the translations frozen into the release. certifi's bundle fixes that; Windows keeps
-reading its own certificate store.
+The macOS .app bundles python.org's Python, and its OpenSSL trusts no certificate authority until the
+installer's "Install Certificates" step runs, which never happens inside a bundle. Windows usually
+trusts the system store, but some machines are missing a public root or intermediate (e.g. GitHub's
+chain) and then fail with CERTIFICATE_VERIFY_FAILED / unable to get local issuer certificate.
+Loading certifi on top of create_default_context() keeps system CAs (including AV MITM roots) and
+fills gaps with Mozilla's bundle.
 """
 from __future__ import annotations
 
@@ -13,20 +14,17 @@ import logging
 import ssl
 import urllib.request
 
-from .osutil import WINDOWS
-
 log = logging.getLogger(__name__)
 
 
 @functools.lru_cache(maxsize=1)
 def ssl_context() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
-    if not WINDOWS:
-        try:
-            import certifi
-            ctx.load_verify_locations(cafile=certifi.where())
-        except (ImportError, OSError) as exc:  # still try what the system trusts
-            log.warning("certifi unavailable, using the default certificate store: %s", exc)
+    try:
+        import certifi
+        ctx.load_verify_locations(cafile=certifi.where())
+    except (ImportError, OSError) as exc:  # still try what the system trusts
+        log.warning("certifi unavailable, using the default certificate store: %s", exc)
     return ctx
 
 
